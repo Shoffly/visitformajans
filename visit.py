@@ -102,7 +102,7 @@ def submit_form_data(form_data):
 
 # Main app
 def main():
-    st.title("🚗 نموذج زيارة تجار الاجنس")
+    st.title("🚗 نموذج زيارة تجار ")
 
     # Load dealer data
     with st.spinner("جاري تحميل بيانات التجار..."):
