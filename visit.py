@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-import gspread
-from google.oauth2.service_account import Credentials
+from google.oauth2 import service_account
 from datetime import datetime
+from google.cloud import bigquery
 
 # Set page config
 st.set_page_config(
@@ -12,38 +12,45 @@ st.set_page_config(
 )
 
 
-# Function to load dealer data from Google Sheets
+# Function to load dealer data from BigQuery
 @st.cache_data(ttl=600)  # Cache data for 10 minutes
 def load_dealers():
     try:
-        # Set up Google Sheets API
-        scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/drive'
-        ]
-
-        # Try using service account file first
+        # Get credentials for BigQuery
         try:
-            credentials = Credentials.from_service_account_file('sheet_access.json', scopes=scopes)
-        except:
-            # If file not found, try using secrets
-            credentials_dict = st.secrets["gcp_service_account"]
-            credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets["service_account"]
+            )
+        except (KeyError, FileNotFoundError):
+            try:
+                credentials = service_account.Credentials.from_service_account_file(
+                    'service_account.json'
+                )
+            except FileNotFoundError:
+                st.error("No credentials found for BigQuery access")
+                return [], {}
 
-        gc = gspread.authorize(credentials)
+        # Create BigQuery client
+        client = bigquery.Client(credentials=credentials)
 
-        # Open the spreadsheet
-        spreadsheet = gc.open('visit form - data')
+        # Query to get dealers
+        query = """
+        SELECT DISTINCT dealer_code, dealer_name
+        FROM `pricing-338819.ajans_dealers.dealers`
+        WHERE dealer_code IS NOT NULL AND dealer_name IS NOT NULL
+        ORDER BY dealer_name
+        """
 
-        # Get the dealers tab for dealer names
-        dealers_sheet = spreadsheet.worksheet('dealers')
-        dealer_headers = ['dealer_code', 'dealer_name']
-        dealers_data = dealers_sheet.get_all_records(expected_headers=dealer_headers)
+        # Execute query
+        dealers_data = client.query(query).to_dataframe()
 
-        # Create a dictionary mapping dealer_code to dealer_name
-        dealers_dict = {dealer['dealer_code']: dealer['dealer_name'] for dealer in dealers_data}
+        # Convert to list of dicts for compatibility
+        dealers_list = dealers_data.to_dict('records')
 
-        return dealers_data, dealers_dict
+        # Create dealer dictionary
+        dealers_dict = dict(zip(dealers_data['dealer_code'], dealers_data['dealer_name']))
+
+        return dealers_list, dealers_dict
 
     except Exception as e:
         st.error(f"خطأ في تحميل بيانات التجار: {str(e)}")
@@ -53,46 +60,71 @@ def load_dealers():
 # Function to submit form data to Google Sheets
 def submit_form_data(form_data):
     try:
-        # Set up Google Sheets API
-        scopes = [
-            'https://www.googleapis.com/auth/spreadsheets',
-            'https://www.googleapis.com/auth/drive'
-        ]
-
-        # Try using service account file first
+        # Get credentials for BigQuery
         try:
-            credentials = Credentials.from_service_account_file('sheet_access.json', scopes=scopes)
-        except:
-            # If file not found, try using secrets
-            credentials_dict = st.secrets["gcp_service_account"]
-            credentials = Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+            credentials = service_account.Credentials.from_service_account_info(
+                st.secrets["service_account"]
+            )
+        except (KeyError, FileNotFoundError):
+            try:
+                credentials = service_account.Credentials.from_service_account_file(
+                    'service_account.json'
+                )
+            except FileNotFoundError:
+                st.error("No credentials found for BigQuery access")
+                return False, "Error: No credentials found"
 
-        gc = gspread.authorize(credentials)
+        # Create BigQuery client
+        client = bigquery.Client(credentials=credentials)
 
-        # Open the spreadsheet
-        spreadsheet = gc.open('visit form - data')
+        # Prepare the query
+        query = """
+        INSERT INTO `pricing-338819.wholesale_test.visit_form_1`
+        (Date, Dealer_name, dealer_spoc, Dealer_code, visit_type, 
+         app_overview, flash_sale, showroom_performance, swift_adoption,
+         direct_lending, car_sharing, d2c_adoption, postive_feedback,
+         negative_feedback, Next_actions, action_owner, action_date,
+         interested_in_visit, benefit_of_visit, next_visit_date,
+         perfered_com_channel)
+        VALUES
+        (@date, @dealer_name, @dealer_spoc, @dealer_code, @visit_type,
+         @app_overview, @flash_sale, @showroom_performance, @swift_adoption,
+         @direct_lending, @car_sharing, @d2c_adoption, @postive_feedback,
+         @negative_feedback, @next_actions, @action_owner, @action_date,
+         @interested_in_visit, @benefit_of_visit, @next_visit_date,
+         @perfered_com_channel)
+        """
 
-        # Get the responses tab
-        responses_sheet = spreadsheet.worksheet('responses')
+        # Configure query parameters
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("date", "DATE", form_data['date']),
+                bigquery.ScalarQueryParameter("dealer_name", "STRING", form_data['dealer_name']),
+                bigquery.ScalarQueryParameter("dealer_spoc", "STRING", form_data['dealer_spoc']),
+                bigquery.ScalarQueryParameter("dealer_code", "STRING", form_data['dealer_code']),
+                bigquery.ScalarQueryParameter("visit_type", "STRING", form_data['visit_type']),
+                bigquery.ScalarQueryParameter("app_overview", "STRING", form_data['app_overview']),
+                bigquery.ScalarQueryParameter("flash_sale", "STRING", form_data['flash_sale']),
+                bigquery.ScalarQueryParameter("showroom_performance", "STRING", form_data['showroom_performance']),
+                bigquery.ScalarQueryParameter("swift_adoption", "STRING", form_data['swift_adoption']),
+                bigquery.ScalarQueryParameter("direct_lending", "STRING", form_data['direct_lending']),
+                bigquery.ScalarQueryParameter("car_sharing", "STRING", form_data['car_sharing']),
+                bigquery.ScalarQueryParameter("d2c_adoption", "STRING", form_data['d2c_adoption']),
+                bigquery.ScalarQueryParameter("postive_feedback", "STRING", form_data['postive_feedback']),
+                bigquery.ScalarQueryParameter("negative_feedback", "STRING", form_data['negative_feedback']),
+                bigquery.ScalarQueryParameter("next_actions", "STRING", form_data['next_actions']),
+                bigquery.ScalarQueryParameter("action_owner", "STRING", form_data['action_owner']),
+                bigquery.ScalarQueryParameter("action_date", "DATE", form_data['action_date']),
+                bigquery.ScalarQueryParameter("interested_in_visit", "BOOL", form_data['interested_in_visit']),
+                bigquery.ScalarQueryParameter("benefit_of_visit", "STRING", form_data['benefit_of_visit']),
+                bigquery.ScalarQueryParameter("next_visit_date", "DATE", form_data['next_visit_date']),
+                bigquery.ScalarQueryParameter("perfered_com_channel", "STRING", form_data['perfered_com_channel'])
+            ]
+        )
 
-        # Append the form data to the responses sheet
-        responses_sheet.append_row([
-            form_data['submitted_datetime'],
-            form_data['dealer'],
-            form_data['purpose'],
-            form_data['showroom'],
-            form_data['swift'],
-            form_data['lending'],
-            form_data['buy_now'],
-            form_data['problems'],
-            form_data['positives'],
-            form_data['requests'],
-            form_data['hatla2ee_link'],
-            form_data['dubizzle_link'],
-            form_data['showroom_capacity'],
-            form_data['dealer_code'],
-            form_data['issues']
-        ])
+        # Execute the query
+        query_job = client.query(query, job_config=job_config)
+        query_job.result()  # Wait for the query to complete
 
         return True, "تم تقديم النموذج بنجاح!"
 
@@ -114,136 +146,137 @@ def main():
 
     # Create form
     with st.form("dealer_visit_form"):
-        st.subheader("معلومات الزيارة")
+        # General Information Section - expanded by default
+        with st.expander("بيانات عامة", expanded=True):
+            # Get current date automatically
+            visit_date = datetime.now().date()
+            st.info(f"تاريخ الزيارة: {visit_date.strftime('%Y-%m-%d')}")
 
-        # Dealer selection
-        dealer_options = [(dealer['dealer_code'], dealer['dealer_name']) for dealer in dealers_data]
-        dealer_codes = [code for code, _ in dealer_options]
-        dealer_names = [name for _, name in dealer_options]
+            # Dealer selection
+            dealer_options = [(dealer['dealer_code'], dealer['dealer_name']) for dealer in dealers_data]
+            dealer_codes = [code for code, _ in dealer_options]
+            dealer_names = [name for _, name in dealer_options]
 
-        selected_dealer_index = st.selectbox(
-            "اختر التاجر *",
-            options=range(len(dealer_options)),
-            format_func=lambda i: dealer_options[i][1]
-        )
-        selected_dealer_code = dealer_codes[selected_dealer_index]
-        selected_dealer_name = dealer_names[selected_dealer_index]
+            selected_dealer_index = st.selectbox(
+                "اسم المعرض",
+                options=range(len(dealer_options)),
+                format_func=lambda i: dealer_options[i][1]
+            )
+            selected_dealer_code = dealer_codes[selected_dealer_index]
+            selected_dealer_name = dealer_names[selected_dealer_index]
 
-        # Purpose of visit (required)
-        purpose = st.text_area("الغرض من الزيارة ", help="يرجى وصف سبب زيارتك لهذا التاجر")
+            # Dealer SPOC
+            dealer_spoc = st.text_input("اسم التاجر")
 
-        # Yes/No questions
-        st.subheader("أسئلة نعم/لا")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            showroom_question = st.radio(
-                "تم اعلام التاجر عن العرض في معرضه؟ *",
-                options=["نعم", "لا"],
-                horizontal=True
+            # Visit type
+            visit_type = st.selectbox(
+                "نوع الزيارة",
+                options=["زيارة أولى", "زيارة متابعة", "زيارة حل مشكلة"]
             )
 
-            swift_question = st.radio(
-                "تم اعلام التاجر عن سويفت؟ *",
-                options=["نعم", "لا"],
-                horizontal=True
+        # Main Discussion Points Section - closed by default
+        with st.expander("نقاط الحوار الرئيسية", expanded=False):
+            # App overview
+            app_overview = st.text_area("أداء التطبيق بشكل عام")
+
+            # Flash sale
+            flash_sale = st.text_area("شراء السيارات في ال ٧٢ ساعة")
+
+            # Showroom performance
+            showroom_performance = st.text_area("العرض في المعرض")
+
+            # Swift adoption
+            swift_adoption = st.text_area("تمويل Swift للعملاء")
+
+            # Direct lending
+            direct_lending = st.text_area("الإقراض المباشر Direct Lending")
+
+            # Car sharing
+            car_sharing = st.text_area("مشاركة العربيات من الابليكشن للعملاء")
+
+            # D2C adoption
+            d2c_adoption = st.text_area("موقع الاجانص D2C")
+
+            # Positive feedback
+            positive_feedback = st.text_area("اكتر حاجة ايجابية في الاجانص")
+
+            # Negative feedback
+            negative_feedback = st.text_area("اكتر حاجة سلبية في الاجانص")
+
+        # Actionable Results Section - closed by default
+        with st.expander("نتائج قابلة للتنفيذ", expanded=False):
+            # Next actions
+            next_actions = st.text_area("الإجراء المتفق عليه")
+
+            # Action owner
+            action_owner = st.text_input("مسؤول التنفيذ")
+
+            # Action date
+            action_date = st.date_input("الموعد المستهدف")
+
+        # Visit Evaluation Section - closed by default
+        with st.expander("تقييم الزيارة", expanded=False):
+            # Dealer interest
+            interested_in_visit = st.selectbox(
+                "مدى تفاعل التاجر",
+                options=["متفاعل", "غير متفاعل"],
+                format_func=lambda x: "نعم" if x == "متفاعل" else "لا"
             )
 
-        with col2:
-            lending_question = st.radio(
-                "تم اعلام التاجر عن التمويل المباشر؟ *",
-                options=["نعم", "لا"],
-                horizontal=True
+            # Visit benefit
+            benefit_of_visit = st.selectbox(
+                "الاستفادة من الزيارة",
+                options=["عالية", "متوسطة", "منخفضة"]
             )
 
-            buy_now_question = st.radio(
-                "تم اعلام التاجر عن تحديث اشتري الآن؟ *",
-                options=["نعم", "لا"],
-                horizontal=True
+        # Follow-up Plan Section - closed by default
+        with st.expander("خطة المتابعة", expanded=False):
+            # Next visit date
+            next_visit_date = st.date_input("تاريخ الزيارة القادمة")
+
+            # Preferred communication channel
+            preferred_channel = st.selectbox(
+                "قناة التواصل المفضلة",
+                options=["WhatsApp", "Phone Call", "Email"]
             )
-
-        # Issues multi-select
-        issues_options = [
-            "الأسعار",
-            "مجموعة السيارات",
-            "عرض بمعرضه",
-            "سويفت",
-            "التمويل المباشر",
-            "لا يوجد"
-        ]
-
-        issues = st.multiselect(
-            "ما هي المشاكل التي يواجهها التاجر؟ *",
-            options=issues_options,
-            help="يمكنك اختيار أكثر من خيار"
-        )
-
-        # Problems encountered (required)
-        problems = st.text_area("مشاكل التاجر *", help="يرجى وصف أي مشاكل تمت مواجهتها أثناء الزيارة")
-
-        # Positive aspects (required)
-        positives = st.text_area("الإيجابيات *", help="يرجى وصف الجوانب الإيجابية التي لاحظتها أثناء الزيارة")
-
-        # Optional fields
-        st.subheader("معلومات إضافية (اختيارية)")
-
-        # Requests
-        requests = st.text_area("الطلبات", help="أي طلبات من التاجر")
-
-        # Links
-        col1, col2 = st.columns(2)
-        with col1:
-            hatla2ee_link = st.text_input("رابط Hatla2ee", help="أدخل رابط صفحة التاجر على Hatla2ee")
-        with col2:
-            dubizzle_link = st.text_input("رابط Dubizzle", help="أدخل رابط صفحة التاجر على Dubizzle")
-
-        # Showroom capacity
-        showroom_capacity = st.number_input("سعة صالة العرض", min_value=0, help="عدد السيارات التي يمكن عرضها")
 
         # Submit button
         submit_button = st.form_submit_button("تقديم النموذج")
 
         if submit_button:
-            # Validate required fields
-            if not problems or not positives or not issues:
-                st.error("يرجى ملء جميع الحقول المطلوبة (المشار إليها بعلامة *)")
+            # Prepare form data
+            form_data = {
+                'date': visit_date,
+                'dealer_name': selected_dealer_name,
+                'dealer_spoc': dealer_spoc,
+                'dealer_code': selected_dealer_code,
+                'visit_type': visit_type,
+                'app_overview': app_overview,
+                'flash_sale': flash_sale,
+                'showroom_performance': showroom_performance,
+                'swift_adoption': swift_adoption,
+                'direct_lending': direct_lending,
+                'car_sharing': car_sharing,
+                'd2c_adoption': d2c_adoption,
+                'postive_feedback': positive_feedback,
+                'negative_feedback': negative_feedback,
+                'next_actions': next_actions,
+                'action_owner': action_owner,
+                'action_date': action_date,
+                'interested_in_visit': interested_in_visit == "متفاعل",
+                'benefit_of_visit': benefit_of_visit,
+                'next_visit_date': next_visit_date,
+                'perfered_com_channel': preferred_channel
+            }
+
+            # Submit form data
+            success, message = submit_form_data(form_data)
+
+            if success:
+                st.success(message)
+                st.balloons()
             else:
-                # Convert yes/no to boolean strings for Google Sheets
-                showroom_value = "Yes" if showroom_question == "نعم" else "No"
-                swift_value = "Yes" if swift_question == "نعم" else "No"
-                lending_value = "Yes" if lending_question == "نعم" else "No"
-                buy_now_value = "Yes" if buy_now_question == "نعم" else "No"
-
-                # Join issues with comma for Google Sheets
-                issues_value = ", ".join(issues)
-
-                # Prepare form data
-                form_data = {
-                    'submitted_datetime': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'dealer': selected_dealer_name,
-                    'dealer_code': selected_dealer_code,
-                    'purpose': purpose,
-                    'showroom': showroom_value,
-                    'swift': swift_value,
-                    'lending': lending_value,
-                    'buy_now': buy_now_value,
-                    'problems': problems,
-                    'positives': positives,
-                    'requests': requests,
-                    'hatla2ee_link': hatla2ee_link,
-                    'dubizzle_link': dubizzle_link,
-                    'showroom_capacity': showroom_capacity,
-                    'issues': issues_value
-                }
-
-                # Submit form data
-                success, message = submit_form_data(form_data)
-
-                if success:
-                    st.success(message)
-                    st.balloons()
-                else:
-                    st.error(message)
+                st.error(message)
 
 
 if __name__ == "__main__":
