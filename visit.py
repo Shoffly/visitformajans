@@ -80,14 +80,14 @@ def submit_form_data(form_data):
         # Prepare the query
         query = """
         INSERT INTO `pricing-338819.wholesale_test.visit_form_1`
-        (Date, Dealer_name, dealer_spoc, Dealer_code, visit_type, 
+        (Date, Dealer_name, dealer_spoc, Dealer_code, visit_type, visitor,
          app_overview, flash_sale, showroom_performance, swift_adoption,
          direct_lending, car_sharing, d2c_adoption, postive_feedback,
          negative_feedback, Next_actions, action_owner, action_date,
          interested_in_visit, benefit_of_visit, next_visit_date,
          perfered_com_channel)
         VALUES
-        (@date, @dealer_name, @dealer_spoc, @dealer_code, @visit_type,
+        (@date, @dealer_name, @dealer_spoc, @dealer_code, @visit_type, @visitor,
          @app_overview, @flash_sale, @showroom_performance, @swift_adoption,
          @direct_lending, @car_sharing, @d2c_adoption, @postive_feedback,
          @negative_feedback, @next_actions, @action_owner, @action_date,
@@ -103,6 +103,7 @@ def submit_form_data(form_data):
                 bigquery.ScalarQueryParameter("dealer_spoc", "STRING", form_data['dealer_spoc']),
                 bigquery.ScalarQueryParameter("dealer_code", "STRING", form_data['dealer_code']),
                 bigquery.ScalarQueryParameter("visit_type", "STRING", form_data['visit_type']),
+                bigquery.ScalarQueryParameter("visitor", "STRING", form_data['visited_by']),
                 bigquery.ScalarQueryParameter("app_overview", "STRING", form_data['app_overview']),
                 bigquery.ScalarQueryParameter("flash_sale", "STRING", form_data['flash_sale']),
                 bigquery.ScalarQueryParameter("showroom_performance", "STRING", form_data['showroom_performance']),
@@ -172,6 +173,12 @@ def main():
             visit_type = st.selectbox(
                 "نوع الزيارة",
                 options=["زيارة أولى", "زيارة متابعة", "زيارة حل مشكلة"]
+            )
+
+            # Visited by
+            visited_by = st.selectbox(
+                "تمت الزيارة بواسطة",
+                options=["Sadek", "Mostafa", "Mai", "Mohamed", "Yousif", "Mamdouh"]
             )
 
         # Main Discussion Points Section - closed by default
@@ -251,6 +258,7 @@ def main():
                 'dealer_spoc': dealer_spoc,
                 'dealer_code': selected_dealer_code,
                 'visit_type': visit_type,
+                'visited_by': visited_by,
                 'app_overview': app_overview,
                 'flash_sale': flash_sale,
                 'showroom_performance': showroom_performance,
