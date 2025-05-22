@@ -3,6 +3,7 @@ import pandas as pd
 from google.oauth2 import service_account
 from datetime import datetime
 from google.cloud import bigquery
+import requests
 
 # Set page config
 st.set_page_config(
@@ -60,6 +61,22 @@ def load_dealers():
 # Function to submit form data to Google Sheets
 def submit_form_data(form_data):
     try:
+        # Send data to webhook
+        webhook_url = "https://anasalaa.app.n8n.cloud/webhook/9c91ea20-15ab-4edd-8dca-3db0bc6d462c"
+
+        # Convert dates to string format for JSON serialization
+        webhook_data = form_data.copy()
+        webhook_data['date'] = webhook_data['date'].isoformat()
+        webhook_data['action_date'] = webhook_data['action_date'].isoformat()
+        webhook_data['next_visit_date'] = webhook_data['next_visit_date'].isoformat()
+
+        try:
+            response = requests.post(webhook_url, json=webhook_data)
+            response.raise_for_status()  # Raise an exception for bad status codes
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Warning: Could not send data to webhook: {str(e)}")
+            # Continue with BigQuery submission even if webhook fails
+
         # Get credentials for BigQuery
         try:
             credentials = service_account.Credentials.from_service_account_info(
